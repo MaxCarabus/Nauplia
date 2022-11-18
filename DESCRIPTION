@@ -1,0 +1,21 @@
+Package: saprobsqlite
+Title: Processing data on hydrobiological monitoring, plancton first
+Version: 0.0.1
+Authors@R: person("Maxim", "Shashkov", email = "max.carabus@gmail.com", role = c("aut","cre"))
+Description: for monitoring
+Depends:
+        R (>= 4.0.0)
+Imports:
+        DBI (>= 1.1.2),
+        RSQLite (>= 2.2.12),
+        readxl (>= 1.4.0),
+        dplyr (>= 1.0.8),
+        tidyr (>= 1.2.0),
+        janitor (>= 2.1.0),
+        rgbif (>= 3.7.1),
+        stringr (>= 1.4.0),
+        lubridate (>= 1.8.0),
+        reshape (>= 0.8.9),
+        vegan (>= 2.5-7)
+License: CC-BY
+Encoding: UTF-8
