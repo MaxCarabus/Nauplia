@@ -279,9 +279,14 @@ getIDspecies <- function(sp) {
 
 # функция добавляющая в таблицу справочника в базе по заданному названию 
 # сведения о виде из GBIF Taxonomy Backbone
-fromBackbone <- function(ids, sp) {
+fromBackbone <- function(ids, sp, genus = NA) {
   
-  result  = name_backbone(sp, kingdom = 'Animalia')
+  if (is.na(genus)) {
+    result = name_backbone(sp, kingdom = 'Animalia')
+  } else {
+    result = name_backbone(sp, kingdom = 'Animalia', genus = genus)
+  } 
+    
   match = result$matchType
 
   if (match == 'NONE') {
@@ -300,7 +305,7 @@ fromBackbone <- function(ids, sp) {
     genus = result$genus
 
     upd = paste0('UPDATE species SET scientific_name = \'',name,
-                 '\', backbone_key = ',key,', rank = \'',rank,
+                 '\', backbone_key = ',key,', rank_ = \'',rank,
                  '\', status = \'',status,'\', match = \'',match,'\', kingdom = \'',kingdom,
                  '\', phylum = \'',phylum,'\', class_ = \'',clss,'\', order_ = \'',order,
                  '\', family_ = \'',family,'\', genus = \'',genus,
@@ -329,7 +334,7 @@ speciesTable <- function(wTable) {
               # 'sp_verbatim varchar UNIQUE,', 
               'sp_verbatim varchar,',
               'scientific_name varchar,backbone_key integer,accepted_key integer,',
-              'rank varchar, status varchar, match varchar,',
+              'rank_ varchar, status varchar, match varchar,',
               'kingdom varchar, phylum  varchar, class_ varchar, order_ varchar,',
               'family_ varchar, genus varchar);')
   dbExecute(connection, crsp)
@@ -375,20 +380,37 @@ speciesTable <- function(wTable) {
     }
     cat('\n\n')
   }
+  
   # справочник с таксонами по BackBone, вместе с сапробностью
-  crview = paste0('CREATE VIEW taxons AS SELECT DISTINCT scientific_name,',
-                  ' backbone_key, rank, kingdom, phylum, class_, order_, family_, ',
-                  ' genus FROM species ',
-                  ' ORDER BY backbone_key;')
+  crview = paste0('CREATE VIEW taxons AS SELECT DISTINCT scientific_name, ',
+                  'sp_verbatim verbatim_name, ids species_id, backbone_key, rank_, kingdom, ', 
+                  'phylum, class_, order_, family_, genus FROM species ',
+                  'ORDER BY backbone_key;')
   dbExecute(connection, crview)
   
   # справочник с сапробностью
-  crview = paste0('CREATE VIEW sp_saprobity AS SELECT DISTINCT scientific_name,',
+  crview = paste0('CREATE VIEW sp_saprobity AS SELECT DISTINCT species_id, scientific_name,',
                   'backbone_key,class_, ind_value FROM species, saprobity ',
                   'WHERE species.ids = saprobity.species_id;')
   dbExecute(connection, crview)
   
+
   # ДОПОЛНЕНИЕ к таблице видов
+  # виды с 'sp.', который почему-то до уровня семейства находится или более высокого
+  fromBackbone(17,  'Alona dentata', 'Alona')
+  # fromBackbone(23,  'Alona sp.', 'Alona')
+  fromBackbone(175, 'Cyclops sp.', 'Cyclops') # глюк неизвестной природы
+  fromBackbone(229, 'Dicranophorus sp.', 'Dicranophorus') # если род не указать 
+  fromBackbone(299, 'Eurycercus serrulatus','Eurycercus')
+  fromBackbone(456, 'Mytilina sp.', 'Mytilina') # выдаёт царство
+  fromBackbone(551, 'Polyarthra sp.', 'Polyarthra')
+  fromBackbone(618, 'Testudinella sp.', 'Testudinella') 
+
+  # library(rgbif)
+  # taxon = name_backbone('Cyclops abyssorum')
+  # taxon$genus
+  # name_backbone('Cyclops', )
+  
   # синонимы, которых нет в Backbone
   fromBackbone(561, 'Wolga spinifera (Western, 1894)')
   upd = paste0('UPDATE species SET status = \'SYNONYM\' WHERE ids = 561;')
@@ -480,6 +502,7 @@ rawTables <- function() {
   crtable = paste0('CREATE TABLE IF NOT EXISTS occurrences ',
                    '(ids integer PRIMARY KEY AUTOINCREMENT, ',
                    'sample_id int REFERENCES samples(ids) ON UPDATE CASCADE ON DELETE CASCADE,',
+                   'species_id int, ', # насколько виды из таблиц с певичкой будут соответствовать локальному справочнику
                    'backbone_key int, taxon_rank  varchar,',
                   #'species_id int REFERENCES species(backbone_key),', # из BackBone могут вылезать виды, которых нет в справочнике
                    'sp_backbone varchar, sp_verbatim varchar,',
@@ -535,7 +558,7 @@ createViews <- function() {
                   "samples.sampling_time_verbatim,sampling_time_min,sampling_time_max,samples.vertical,",
                   "trunk,horizon_verbatim,horizon_min,horizon_max,temperature,instrument,",
                   "occurrences.backbone_key,occurrences.taxon_rank,scientific_name,",
-                  "occurrences.sp_backbone,occurrences.sp_verbatim,",
+                  "occurrences.sp_backbone,occurrences.sp_verbatim,occurrences.species_id,",
                   "ex_count,biomass,count_m3,biomass_m3 ",
                   "FROM samples JOIN water_bodies ON water_bodies.ids = samples.water_body_id ",
                   "JOIN hydrobiological_stantions ON hydrobiological_stantions.ids = samples.station_id ",
@@ -580,7 +603,7 @@ createViews <- function() {
                   'LEFT JOIN samples_sum ON samples_sum.sample_id = occurrences.sample_id ',
                   'GROUP BY occurrences.sample_id;')
   dbExecute(connection, crview)
-  cat('Представление с суммой индикаторных видов создано')
+  cat('Представление с суммой индикаторных видов создано/n')
   
   # рассчитываем сапробность
   crview = paste0('CREATE VIEW saprobity_1 AS SELECT ids, occurrences.sample_id,',
@@ -611,7 +634,7 @@ createViews <- function() {
                   'total_dump.sampling_time_min, total_dump.sampling_time_max, ',
                   'total_dump.vertical, total_dump.trunk, total_dump.horizon_verbatim,',
                   'total_dump.horizon_min, total_dump.horizon_max, total_dump.temperature,',
-                  'total_dump.instrument, backbone_key, taxon_rank, scientific_name,',
+                  'total_dump.instrument, backbone_key, species_id, taxon_rank, scientific_name,',
                   'sp_backbone, sp_verbatim, ex_count, biomass, count_m3, biomass_m3, ',
                   'amount_sum_m3, biomass_sum_m3,',
                   'round(CAST(count_m3 AS real) / amount_sum_m3 * 100,3) count_m3_percent,',
@@ -625,7 +648,7 @@ createViews <- function() {
                   'sum(round(biomass_m3 / ind_biomass_sum_m3 * ind_value,3)) saprobity_weighted ',
                   'FROM saprobity_1 GROUP BY sample_id ORDER BY sample_id;')
   dbExecute(connection, crview)
-  print('Создали представления сапробности')
+  cat('Создали представления сапробности/n')
   
   # индекс Андронниковой: отнощение численности Cladocera (в данном случае отряда Diplostraca)
   # к 
@@ -667,7 +690,7 @@ createViews <- function() {
                   ' WHERE crustacea IS NOT NULL AND rotifera IS NOT NULL ',
                   ' AND rotifera <> 0 ORDER BY coef_meaem_1.sample_id;')
   dbExecute(connection, crview)
-  print('создали представления коэффициентов')
+  cat('создали представления коэффициентов/n')
 
   crview = paste0('CREATE VIEW samples_summary AS SELECT samples_sum.sample_id, samples_sum.sample_code,',
                   'filial, water_body_code, water_body_name, water_body_verbatim,',
@@ -842,28 +865,28 @@ diapHandle <- function(tDiap,tp) {
 
 # есть ли проба уже в базе, запрос по характеристикам пробы: ID пункта, дата, время, номер створа, вертикаль горизонт
 sampleExists <- function(sample1) {
-  
+
   if (sample1[3] == 'null') {
     qtime = ' AND sampling_time_min IS NULL '
   } else {
     qtime = paste0(' AND sampling_time_min = \'',sample1[3],'\'')
   }
-  
+
   if (is.na(sample1[5]) || sample1[5] == 'null') {
     qvert = ' AND vertical IS NULL '
   } else {
     qvert = paste0(' AND vertical = ', sample1[5])
   }
-  
+
   if (is.na(sample1[6]) || sample1[6] == 'null') {
     horizon = ' AND horizon_max IS NULL '
   } else {
     horizon = paste0(' AND horizon_max = ', sample1[6])
   }
-  
+
   select = paste0('SELECT ids FROM samples WHERE station_id = ',sample1[1],
                   ' AND sampling_date = \'',sample1[2],'\'',qtime,
-                  ' AND trunk = \'',sample1[4],'\'',qvert,horizon,';')
+                  ' AND trunk = \'',as.numeric(sample1[4]),'\'',qvert,horizon,';')
   
   # cat(paste0('\n',select,'\n'))
   result = dbGetQuery(connection,select)$ids
@@ -1054,7 +1077,7 @@ sample2base <- function(sampletable,filial,syear) {
     
     instrument  = wsample[,11]
     
-    sampleNew = list(stid,sCode,as.character(sDate),sTime[1],trunk,vert,hor[1])
+    sampleNew = list(stid,as.character(sDate),sTime[1],trunk,vert,hor[1])
     
     cat(paste(sampleNew))
     cat('\n')
@@ -1142,9 +1165,37 @@ speciesTreatment <- function(sp) {
   sp = sub('Polyarthra d.dolichoptera','Polyarthra dolichoptera',sp)
   sp = sub('Ecyclops','Eucyclops',sp)
   sp = sub('De Guerne','de Guerne',sp)
+  sp = sub('Brach cal.','Brachionus calyciflorus',sp)
+  sp = sub('Brach. cal.','Brachionus calyciflorus',sp)
+  sp = sub('Brachion.','Brachionus',sp)
+  sp = sub('Brachion. cal.','Brachionus calyciflorus',sp)
+  
   
   # sp = sub('','',sp)
   sp = str_squish(sp)
+}
+
+# getSpID('Keratella cochlearis (Gosse, 1851)','Keratella cochlearis (Gosse, 1851)')
+# getSpID('Microcyclops bicolor (Sars, 1863)','Microcyclops bicolor (Sars, 1863)')
+
+# получаем ID по локальному справочнику
+getSpID <- function(spVerbatim,spBackBone) {
+  select = paste0('SELECT ids FROM species WHERE sp_verbatim = \'',spVerbatim,'\';')
+  # select = "SELECT ids FROM species WHERE sp_verbatim = 'хрен'";
+  result = dbGetQuery(connection,select)
+  ids = result[,1]
+  if (length(ids) == 0) { # если по вербатим не найдено, проверяем по названию из backBone
+    select = paste0('SELECT ids FROM species WHERE scientific_name = \'',spBackBone,'\';')
+    result = dbGetQuery(connection,select)
+    ids = result[,1]    
+    if (length(ids) == 0) {
+      ids = 0
+    } else {
+      ids = -ids
+    }
+  }
+  if (length(ids) > 1) ids = ids[1]
+  return(ids)
 }
 
 
@@ -1176,6 +1227,7 @@ occur2base <- function(sampletable,filial) {
   occurs = occurs[occurs[,7] != 'СУММА',]
   occurs = occurs[occurs[,7] != 'гидробионты отсутствуют',]
   occurs = occurs[occurs[,7] != 'Отбор не осуществлен',]
+  occurs = occurs[occurs[,7] != 'нет отбора в июле',]
   
   # occurs = occurs[!is.na(occurs$`Вид`),] # где вид просто не указан
   occurs = occurs[!is.na(occurs[,7]),] # где вид просто не указан
@@ -1275,6 +1327,9 @@ occur2base <- function(sampletable,filial) {
     sp[sp == 'Nauplii Cyclopidae'] = 'Cyclopidae'
     sp[sp == 'Cop. Cyclopidae'] = 'Cyclopidae'
     
+    sp[sp == 'Bdelloidae sp.'] = 'Bdelloidea' # 2023-11-13
+    sp[sp == 'Bosminopsis deitersiRichard, 1895'] = 'Bosminopsis deitersi Richard, 1895'
+    
     sp[sp == 'Nauplii Temoridae'] = 'Temoridae'
     
     # sp[sp == 'Bosmina longispina Leydig'] = 'Bosmina longispina'
@@ -1317,6 +1372,7 @@ occur2base <- function(sampletable,filial) {
     sp[sp == 'Keratella quadratа (Müller, 1786)'] = 'Keratella quadrata (Müller, 1786)'
     sp[sp == 'Cyclops strenuus Fisch'] = 'Cyclops strenuus Sars G.O., 1903'
     sp[sp == 'Cyclops strenuus Fischer, 1851'] = 'Cyclops strenuus Sars G.O., 1903'
+    sp[sp == 'Polyarthra sp.-'] = 'Polyarthra'
     
     
     # вид проверяется по GBIF Taxonomy Backbone, если таксон совсен не найден, то будет код - 1
@@ -1377,6 +1433,10 @@ occur2base <- function(sampletable,filial) {
       write.csv(bblist,'BackBoneBuffer.csv')
     }
     
+    # ID вида по локальному справочнику
+    spID = getSpID(sp,spbb)
+    
+    
     exCount = occ[,9]   # число экземпляров
     biomass = occ[,10]  # биомасса
     countm3 = occ[,11]  # численность на м3
@@ -1404,9 +1464,9 @@ occur2base <- function(sampletable,filial) {
  
     # cat('очередная запись пробы \t')
     # cat(sampleID,' ',spVerb,'\t\t',count,'\t',biomass,'\t')
-    insert = paste0('INSERT INTO occurrences (sample_id, backbone_key, taxon_rank,',
+    insert = paste0('INSERT INTO occurrences (sample_id, species_id, backbone_key, taxon_rank,',
                     'sp_backbone, sp_verbatim, ex_count, biomass, count_m3, biomass_m3) ',
-                    ' VALUES (',sampleID,',',spKey,',\'',rank,'\',\'',spbb,'\',\'',
+                    ' VALUES (',sampleID,',',spID,',',spKey,',\'',rank,'\',\'',spbb,'\',\'',
                     spVerb,'\',',exCount,',',biomass,',',countm3,',',biomassm3,');')
     # cat(paste0('\n',insert,'\n'))
     dbExecute(connection, insert)
@@ -1453,7 +1513,7 @@ valueAdjust <- function(filial, var) {
   sql = paste0('SELECT ids FROM samples WHERE filial = \'',filial,'\';')
   result = dbGetQuery(connection, sql)
   
-  class(result[,1])
+  # class(result[,1])
 
   if (var == 'count') upd0 = 'UPDATE occurrences SET count_m3 = count_m3 * 1000 WHERE sample_id IN ('
   if (var == 'biomass') upd0 = 'UPDATE occurrences SET biomass_m3 = biomass_m3 * 1000 WHERE sample_id IN ('

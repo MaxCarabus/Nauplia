@@ -1,4 +1,26 @@
-setwd('/media/carabus/Transcend/investigation/data_science/bdi/plankton/scripts/2023-03-31')
+setwd('/media/carabus/CARABUS20162/projects/plankton/scripts/2023-11-12')
+
+# формируем список видов из первички, не совпавших со справочником
+outSpecies = data.frame(backnone_key = integer(0),taxon_rank = character(0),
+                  sp_backbone = character(0),sp_verbatim = character(0))
+
+for(i in 2018:2022) {
+  # i = 2018
+  connection <- dbConnect(RSQLite::SQLite(), paste0('plankton_',i,'.sqlite'))
+  sql = 'SELECT DISTINCT sp_verbatim, sp_backbone, backbone_key, taxon_rank 
+            FROM occurrences WHERE species_id = 0;'
+  result = dbGetQuery(connection,sql) # возвращает Data Frame
+  # names(result)
+  outSpecies = rbind(outSpecies, result)
+  # nrow(outSpecies)
+  outSpecies = unique(outSpecies)
+  # nrow(outSpecies)
+  outSpecies = outSpecies[order(outSpecies$sp_backbone),]
+  outSpecies = outSpecies[order(outSpecies$sp_verbatim),]
+}
+
+write.csv(outSpecies,'outSpecies.csv')
+
 
 # проверяем список видов
 sp18 = read.csv('output/species_records_2018.csv')
